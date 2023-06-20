@@ -1,4 +1,4 @@
-use web_server::make_server;
+use next_rs::make_server;
 
 make_server!("src/api");
 

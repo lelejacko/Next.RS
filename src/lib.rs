@@ -179,9 +179,11 @@ fn get_defines(base_route: Route) -> String {
 }
 
 #[proc_macro]
-pub fn make_server(routes_path: TokenStream) -> TokenStream {
-    let path = routes_path.to_string().replace("\"", "");
-    let base_route = Route::base(path);
+pub fn make_server(ts: TokenStream) -> TokenStream {
+    let args = ts.into_iter().collect::<Vec<_>>();
+
+    let routes_path = format!("{}", &args[0]).replace("\"", "");
+    let base_route = Route::base(routes_path);
 
     let defines = get_defines(base_route);
 

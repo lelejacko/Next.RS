@@ -6,9 +6,9 @@ version = 3
 name = "example"
 version = "0.1.0"
 dependencies = [
- "web-server",
+ "next-rs",
 ]
 
 [[package]]
-name = "web-server"
+name = "next-rs"
 version = "0.1.0"
