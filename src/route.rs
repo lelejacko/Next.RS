@@ -136,8 +136,7 @@ impl Route {
         if self.is_api() {
             handler += &format!("{mod_path}handler(req)");
         } else if self.is_static() {
-            handler +=
-                &format!("Response {{code: 200, body: Some(String::from({mod_path}BODY))}}",);
+            handler += &format!("Response {{code: 200, body: Some(String::from({mod_path}BODY))}}");
         } else {
             return None;
         }

@@ -6,11 +6,11 @@ use {crate::route::Route, defines::DEFINES, proc_macro::TokenStream};
 
 fn get_defines(base_route: Route) -> String {
     let modules = base_route.get_mod(None);
-    let handles = base_route.get_handlers().join("\n");
+    let handlers = base_route.get_handlers().join("\n");
 
     DEFINES
         .replace("$modules", &modules)
-        .replace("$handles", &handles)
+        .replace("$handlers", &handlers)
 }
 
 #[proc_macro]

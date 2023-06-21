@@ -12,7 +12,7 @@ fn handle(req: Request) -> Response {
     let clean_path = req.path.split("?").collect::<Vec<_>>()[0].trim_matches('/');
 
     match clean_path {
-        $handles
+        $handlers
         _ => Response {
             code: 404,
             body: Some(String::from("Not found")),
