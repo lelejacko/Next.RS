@@ -1,32 +1,54 @@
-use std::{
-    fs::{metadata, read_dir, read_to_string},
-    process::exit,
+use {
+    crate::mime_type::MimeType,
+    std::{
+        fs::{metadata, read_dir, read_to_string},
+        process::exit,
+    },
 };
 
-#[derive(Debug, Clone)]
+pub static ROUTES_PATH: &str = "src/routes";
+
+#[derive(Debug)]
 pub struct Route {
     path: String,
     children: Option<Vec<Route>>,
-    nesting: usize,
+    static_body: Option<String>,
+    mime_type: Option<MimeType>, // TODO: implement headers
 }
 
 impl Route {
-    fn new(path: String, nesting: usize) -> Self {
+    fn new(path: String) -> Self {
         let mut children: Option<Vec<Route>> = None;
+        let mut static_body: Option<String> = None;
+        let mut mime_type: Option<MimeType> = None;
+
         if metadata(&path).unwrap().is_dir() {
-            children = Some(Self::get_children(&path, nesting + 1));
+            children = Some(Self::get_children(&path));
+        } else if !path.ends_with(".rs") {
+            static_body = Some(
+                read_to_string(&path)
+                    .unwrap()
+                    .replace("\n", "\\n")
+                    .replace("\"", "\\\""),
+            );
+
+            let split_path = path.split(".").collect::<Vec<_>>();
+            if split_path.len() > 1 {
+                mime_type = MimeType::from(split_path[1]);
+            }
         }
 
         Route {
             path,
             children,
-            nesting,
+            static_body,
+            mime_type,
         }
     }
 
-    pub fn base(path: String) -> Self {
-        Self::check_is_dir(&path);
-        Self::new(path, 0)
+    pub fn base() -> Self {
+        Self::check_is_dir(&ROUTES_PATH);
+        Self::new(String::from(ROUTES_PATH))
     }
 
     fn check_is_dir(path: &str) {
@@ -45,10 +67,8 @@ impl Route {
         }
     }
 
-    fn get_children(base_path: &str, base_nesting: usize) -> Vec<Self> {
+    fn get_children(base_path: &str) -> Vec<Self> {
         Self::check_is_dir(base_path);
-
-        let nesting = base_nesting + 1;
 
         read_dir(base_path)
             .unwrap()
@@ -57,7 +77,7 @@ impl Route {
                 let entry_path = entry.path();
                 let path = String::from(entry_path.to_str().unwrap());
 
-                Self::new(path, nesting)
+                Self::new(path)
             })
             .collect()
     }
@@ -72,52 +92,82 @@ impl Route {
     }
 
     fn route_path(&self) -> String {
-        self.clean_path().replace("/r#mod", "")
+        self.clean_path()
+            .replace("routes", "")
+            .replace("r#mod", "")
+            .replace("index.html", "")
+            .trim_matches('/')
+            .to_string()
     }
 
-    fn handler_identifier(&self) -> String {
-        format!(
-            "{}::handler(req)",
-            self.clean_path().split("/").collect::<Vec<_>>().join("::")
-        )
+    fn is_mod(&self) -> bool {
+        self.path.ends_with(".rs")
+            || (self.children.is_some()
+                && self.children.as_ref().unwrap().iter().any(|c| c.is_mod()))
     }
 
-    fn handle_fn_match_arm(&self) -> String {
-        format!(
-            "\"{}\" => {},",
-            self.route_path(),
-            self.handler_identifier()
-        )
+    fn has_handler(&self) -> bool {
+        metadata(&self.path).unwrap().is_file() && {
+            let content = read_to_string(&self.path).unwrap();
+            content.contains("pub fn handler(")
+        }
+    }
+
+    fn is_api(&self) -> bool {
+        self.is_mod() && self.has_handler()
+    }
+
+    fn is_static(&self) -> bool {
+        self.static_body.is_some()
+    }
+
+    fn handler(&self) -> Option<String> {
+        let mut handler = format!("\"{}\" => ", self.route_path(),);
+
+        let mod_path = format!(
+            "{}::",
+            self.clean_path()
+                .split("/")
+                .collect::<Vec<_>>()
+                .join("::")
+                .replace(".", "_")
+        );
+
+        if self.is_api() {
+            handler += &format!("{mod_path}handler(req)");
+        } else if self.is_static() {
+            handler +=
+                &format!("Response {{code: 200, body: Some(String::from({mod_path}BODY))}}",);
+        } else {
+            return None;
+        }
+
+        Some(handler + ",")
     }
 
     fn mod_name(&self) -> String {
         let clean_path = self.clean_path();
         let split_path: Vec<_> = clean_path.split("/").collect();
-        String::from(split_path[split_path.len() - 1])
+        String::from(split_path[split_path.len() - 1]).replace(".", "_")
     }
 
-    fn has_handler(&self) -> bool {
-        if !metadata(&self.path).unwrap().is_file() {
-            println!("Path {} is not a directory", self.path);
-            exit(-1);
-        }
-
-        let content = read_to_string(&self.path).unwrap();
-
-        content.contains("pub fn handler(")
-    }
-
-    pub fn get_mod(&self) -> String {
-        let padding = vec!["    "; self.nesting as usize].join("");
+    pub fn get_mod(&self, nesting: Option<usize>) -> String {
+        let nest = if let Some(n) = nesting { n } else { 0 };
+        let padding = vec!["    "; nest as usize].join("");
         let mut mod_str = format!("{}pub mod {}", padding, self.mod_name());
 
         if let Some(children) = &self.children {
             let sub_mods = &children
                 .iter()
-                .map(|c| c.get_mod())
+                .map(|c| c.get_mod(Some(nest + 1)))
                 .collect::<Vec<_>>()
                 .join("\n");
-            mod_str += &format!(" {{\n{}\n{}}}", sub_mods, padding);
+            mod_str += &format!(" {{\n{}\n{padding}}}", sub_mods);
+        } else if self.is_static() {
+            mod_str += &format!(
+                " {{\n{padding}    pub static BODY: &str = \"{}\";\n{padding}}}",
+                self.static_body.clone().unwrap()
+            )
         } else {
             mod_str += ";";
         }
@@ -125,20 +175,20 @@ impl Route {
         mod_str
     }
 
-    pub fn get_handle_fn_arms(&self) -> Vec<String> {
-        let mut arms: Vec<String> = vec![];
+    pub fn get_handlers(&self) -> Vec<String> {
+        let mut handlers: Vec<String> = vec![];
 
         if let Some(children) = &self.children {
-            arms.append(
+            handlers.append(
                 &mut children
                     .iter()
-                    .flat_map(|c| c.get_handle_fn_arms())
+                    .flat_map(|c| c.get_handlers())
                     .collect::<Vec<_>>(),
             );
-        } else if self.has_handler() {
-            arms.push(self.handle_fn_match_arm());
+        } else if let Some(handler) = self.handler() {
+            handlers.push(handler);
         }
 
-        arms
+        handlers
     }
 }
