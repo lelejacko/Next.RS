@@ -1,4 +1,5 @@
-pub static DEFINES: &str = stringify!(
+pub static DEFINES: &str = stringify! {
+$modules
 
 use std::{
     fmt::Display,
@@ -6,6 +7,18 @@ use std::{
     net::{TcpListener, TcpStream},
     thread::{spawn, JoinHandle},
 };
+
+fn handle(req: Request) -> Response {
+    let clean_path = req.path.split("?").collect::<Vec<_>>()[0].trim_matches('/');
+
+    match clean_path {
+        $handles
+        _ => Response {
+            code: 404,
+            body: Some(String::from("Not found")),
+        },
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum ReqMethod {
@@ -57,8 +70,6 @@ pub struct Response {
     pub code: u16,
     pub body: Option<String>,
 }
-
-pub type HandlerFn = fn(Request) -> Response;
 
 struct ThreadPool {
     threads: Vec<Option<JoinHandle<()>>>,
@@ -151,7 +162,7 @@ impl WebServer {
                 Err(e) => {
                     println!("{e}");
                     return None;
-                },
+                }
             }
 
             headers.push(line);
@@ -183,5 +194,4 @@ impl WebServer {
         Some(Request { method, path, body })
     }
 }
-
-);
+};
