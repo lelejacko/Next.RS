@@ -136,7 +136,14 @@ impl Route {
         if self.is_api() {
             handler += &format!("{mod_path}handler(req)");
         } else if self.is_static() {
-            handler += &format!("Response {{code: 200, body: Some(String::from({mod_path}BODY))}}");
+            handler += &format!(
+                "Response {{code: 200, headers: {}, body: Some(String::from({mod_path}BODY))}}",
+                if let Some(mime_type) = &self.mime_type {
+                    format!("Some(String::from(\"Content-Type={}\"))", mime_type.get())
+                } else {
+                    String::from("None")
+                }
+            );
         } else {
             return None;
         }

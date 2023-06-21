@@ -1,5 +1,5 @@
-pub static DEFINES: &str = stringify! {
-$modules
+pub static DEFINES: &str = stringify! { // <=
+$modules // <=
 
 use std::{
     fmt::Display,
@@ -12,9 +12,10 @@ fn handle(req: Request) -> Response {
     let clean_path = req.path.split("?").collect::<Vec<_>>()[0].trim_matches('/');
 
     match clean_path {
-        $handlers
+        $handlers // <=
         _ => Response {
             code: 404,
+            headers: None,
             body: Some(String::from("Not found")),
         },
     }
@@ -68,6 +69,7 @@ pub struct Request {
 #[derive(Debug)]
 pub struct Response {
     pub code: u16,
+    pub headers: Option<String>,
     pub body: Option<String>,
 }
 
@@ -194,4 +196,4 @@ impl WebServer {
         Some(Request { method, path, body })
     }
 }
-};
+}; // <=
