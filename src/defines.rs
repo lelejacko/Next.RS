@@ -135,10 +135,15 @@ impl WebServer {
             println!("{:?} {} => {}", method, path, response.code);
 
             let res_string = format!(
-                "HTTP/1.1 {} \r\n\r\n{}",
+                "HTTP/1.1 {}\n{}\r\n\r\n{}",
                 response.code,
-                if let Some(content) = response.body {
-                    content
+                if let Some(headers) = response.headers {
+                    headers
+                } else {
+                    String::new()
+                },
+                if let Some(body) = response.body {
+                    body
                 } else {
                     String::new()
                 }

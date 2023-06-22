@@ -5,7 +5,7 @@ mod route;
 use {defines::DEFINES, proc_macro::TokenStream, route::Route};
 
 fn get_defines(base_route: Route) -> String {
-    let modules = base_route.get_mod(None);
+    let modules = base_route.get_mod();
     let handlers = base_route.get_handlers().join("\n");
 
     DEFINES

@@ -13,7 +13,7 @@ pub struct Route {
     path: String,
     children: Option<Vec<Route>>,
     static_body: Option<String>,
-    mime_type: Option<MimeType>, // TODO: implement headers
+    mime_type: Option<MimeType>,
 }
 
 impl Route {
@@ -28,7 +28,7 @@ impl Route {
             static_body = Some(
                 read_to_string(&path)
                     .unwrap()
-                    .replace("\n", "\\n")
+                    // .replace("\n", "\\n")
                     .replace("\"", "\\\""),
             );
 
@@ -137,12 +137,11 @@ impl Route {
             handler += &format!("{mod_path}handler(req)");
         } else if self.is_static() {
             handler += &format!(
-                "Response {{code: 200, headers: {}, body: Some(String::from({mod_path}BODY))}}",
-                if let Some(mime_type) = &self.mime_type {
-                    format!("Some(String::from(\"Content-Type={}\"))", mime_type.get())
-                } else {
-                    String::from("None")
-                }
+                "Response {{
+                    code: 200, 
+                    headers: Some(String::from({mod_path}HEADERS)), 
+                    body: Some(String::from({mod_path}BODY))
+                }}"
             );
         } else {
             return None;
@@ -157,21 +156,27 @@ impl Route {
         String::from(split_path[split_path.len() - 1]).replace(".", "_")
     }
 
-    pub fn get_mod(&self, nesting: Option<usize>) -> String {
-        let nest = if let Some(n) = nesting { n } else { 0 };
-        let padding = vec!["    "; nest as usize].join("");
-        let mut mod_str = format!("{}pub mod {}", padding, self.mod_name());
+    pub fn get_mod(&self) -> String {
+        let mut mod_str = format!("pub mod {}", self.mod_name());
 
         if let Some(children) = &self.children {
             let sub_mods = &children
                 .iter()
-                .map(|c| c.get_mod(Some(nest + 1)))
+                .map(|c| c.get_mod())
                 .collect::<Vec<_>>()
                 .join("\n");
-            mod_str += &format!(" {{\n{}\n{padding}}}", sub_mods);
+            mod_str += &format!(" {{{}}}", sub_mods);
         } else if self.is_static() {
             mod_str += &format!(
-                " {{\n{padding}    pub static BODY: &str = \"{}\";\n{padding}}}",
+                "{{
+                    pub static HEADERS: &str = \"{}\";
+                    pub static BODY: &str = \"{}\";
+                }}",
+                if let Some(mime_type) = &self.mime_type {
+                    format!("Content-Type={}", mime_type.get())
+                } else {
+                    String::new()
+                },
                 self.static_body.clone().unwrap()
             )
         } else {
