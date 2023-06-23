@@ -1,7 +1,7 @@
 use {
     crate::mime_type::MimeType,
     std::{
-        fs::{metadata, read_dir, read_to_string},
+        fs::{metadata, read, read_dir, read_to_string},
         process::exit,
     },
 };
@@ -12,25 +12,21 @@ pub static ROUTES_PATH: &str = "src/routes";
 pub struct Route {
     path: String,
     children: Option<Vec<Route>>,
-    static_body: Option<String>,
+    static_body: Option<Vec<u8>>,
     mime_type: Option<MimeType>,
 }
 
 impl Route {
     fn new(path: String) -> Self {
         let mut children: Option<Vec<Route>> = None;
-        let mut static_body: Option<String> = None;
+        let mut static_body: Option<Vec<u8>> = None;
         let mut mime_type: Option<MimeType> = None;
 
         if metadata(&path).unwrap().is_dir() {
             children = Some(Self::get_children(&path));
         } else if !path.ends_with(".rs") {
-            static_body = Some(
-                read_to_string(&path)
-                    .unwrap()
-                    // .replace("\n", "\\n")
-                    .replace("\"", "\\\""),
-            );
+            // TODO: map as bytes
+            static_body = Some(read(&path).unwrap());
 
             let split_path = path.split(".").collect::<Vec<_>>();
             if split_path.len() > 1 {
@@ -139,8 +135,8 @@ impl Route {
             handler += &format!(
                 "Response {{
                     code: 200, 
-                    headers: Some(String::from({mod_path}HEADERS)), 
-                    body: Some(String::from({mod_path}BODY))
+                    headers: Some({mod_path}HEADERS.to_vec()), 
+                    body: Some({mod_path}BODY.to_vec())
                 }}"
             );
         } else {
@@ -169,15 +165,15 @@ impl Route {
         } else if self.is_static() {
             mod_str += &format!(
                 "{{
-                    pub static HEADERS: &str = \"{}\";
-                    pub static BODY: &str = \"{}\";
+                    pub static HEADERS: &[u8] = b\"{}\";
+                    pub static BODY: &[u8] = &{:?};
                 }}",
                 if let Some(mime_type) = &self.mime_type {
                     format!("Content-Type={}", mime_type.get())
                 } else {
                     String::new()
                 },
-                self.static_body.clone().unwrap()
+                self.static_body.as_ref().unwrap()
             )
         } else {
             mod_str += ";";

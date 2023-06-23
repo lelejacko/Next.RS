@@ -8,19 +8,6 @@ use std::{
     thread::{spawn, JoinHandle},
 };
 
-fn handle(req: Request) -> Response {
-    let clean_path = req.path.split("?").collect::<Vec<_>>()[0].trim_matches('/');
-
-    match clean_path {
-        $handlers // <=
-        _ => Response {
-            code: 404,
-            headers: None,
-            body: Some(String::from("Not found")),
-        },
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum ReqMethod {
     Get,
@@ -69,8 +56,31 @@ pub struct Request {
 #[derive(Debug)]
 pub struct Response {
     pub code: u16,
-    pub headers: Option<String>,
-    pub body: Option<String>,
+    pub headers: Option<Vec<u8>>,
+    pub body: Option<Vec<u8>>,
+}
+
+impl Response {
+    pub fn from_string(code: u16, headers: Option<&str>, body: Option<&str>) -> Self {
+        Response {
+            code,
+            headers: headers.map(|h| h.as_bytes().to_vec()),
+            body: body.map(|b| b.as_bytes().to_vec()),
+        }
+    }
+}
+
+fn handle(req: Request) -> Response {
+    let clean_path = req.path.split("?").collect::<Vec<_>>()[0].trim_matches('/');
+
+    match clean_path {
+        $handlers // <=
+        _ => Response {
+            code: 404,
+            headers: None,
+            body: Some(b"Not found".to_vec()),
+        },
+    }
 }
 
 struct ThreadPool {
@@ -134,22 +144,17 @@ impl WebServer {
             #[cfg(debug_assertions)]
             println!("{:?} {} => {}", method, path, response.code);
 
-            let res_string = format!(
-                "HTTP/1.1 {}\n{}\r\n\r\n{}",
-                response.code,
-                if let Some(headers) = response.headers {
-                    headers
-                } else {
-                    String::new()
-                },
-                if let Some(body) = response.body {
-                    body
-                } else {
-                    String::new()
-                }
-            );
+            let mut res = format!("HTTP/1.1 {}", response.code).as_bytes().to_vec();
 
-            stream.write_all(res_string.as_bytes()).unwrap();
+            if let Some(mut headers) = response.headers {
+                res.append(&mut headers);
+            }
+
+            if let Some(mut body) = response.body {
+                res.append(&mut body);
+            }
+
+            stream.write_all(&res).unwrap();
         }
     }
 
