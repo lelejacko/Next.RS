@@ -1,6 +1,7 @@
 use {
     crate::mime_type::MimeType,
     std::{
+        cmp::Ordering,
         fs::{metadata, read, read_dir, read_to_string},
         process::exit,
     },
@@ -88,46 +89,21 @@ impl Route {
     }
 
     fn route_matcher(&self) -> String {
-        let clean_path = self
-            .clean_path()
-            .replace("routes", "")
-            .replace("r#mod", "")
-            .replace("index.html", "")
-            .trim_matches('/')
-            .to_string();
+        let clean_path = format!(
+            "\"{}\"",
+            self.clean_path()
+                .replace("routes", "")
+                .replace("r#mod", "")
+                .replace("index.html", "")
+                .trim_matches('/')
+                .to_string()
+        );
 
         if !clean_path.contains("/__") {
-            return format!("\"{clean_path}\"");
+            return clean_path;
         }
 
-        let mut length = 0;
-
-        let mut conditions: Vec<_> = clean_path
-            .split("__")
-            .enumerate()
-            .flat_map(|(i, s)| {
-                let piece = if i == 0 {
-                    s
-                } else {
-                    s.split_once("/").unwrap_or(("", "")).1
-                };
-
-                if piece.is_empty() {
-                    return vec![];
-                }
-
-                length += piece.len();
-
-                vec![format!(
-                    "p.{}(\"{piece}\")",
-                    if i == 0 { "starts_with" } else { "contains" }
-                )]
-            })
-            .collect();
-
-        conditions.push(format!("p.len() > {length}"));
-
-        format!("p if {}", conditions.join(" && "))
+        format!("path if matches_dynamic_route(path, {clean_path}, &mut req)")
     }
 
     fn is_mod(&self) -> bool {
@@ -229,6 +205,19 @@ impl Route {
         } else if let Some(handler) = self.handler() {
             handlers.push(handler);
         }
+
+        handlers.sort_by(|h1, h2| {
+            let h1_dyn = h1.contains("matches_dynamic_route");
+            let h2_dyn = h2.contains("matches_dynamic_route");
+
+            if h1_dyn == h2_dyn {
+                Ordering::Equal
+            } else if h1_dyn && !h2_dyn {
+                Ordering::Greater
+            } else {
+                Ordering::Less
+            }
+        });
 
         handlers
     }
