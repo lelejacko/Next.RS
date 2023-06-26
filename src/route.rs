@@ -87,13 +87,47 @@ impl Route {
             .to_string()
     }
 
-    fn route_path(&self) -> String {
-        self.clean_path()
+    fn route_matcher(&self) -> String {
+        let clean_path = self
+            .clean_path()
             .replace("routes", "")
             .replace("r#mod", "")
             .replace("index.html", "")
             .trim_matches('/')
-            .to_string()
+            .to_string();
+
+        if !clean_path.contains("/__") {
+            return format!("\"{clean_path}\"");
+        }
+
+        let mut length = 0;
+
+        let mut conditions: Vec<_> = clean_path
+            .split("__")
+            .enumerate()
+            .flat_map(|(i, s)| {
+                let piece = if i == 0 {
+                    s
+                } else {
+                    s.split_once("/").unwrap_or(("", "")).1
+                };
+
+                if piece.is_empty() {
+                    return vec![];
+                }
+
+                length += piece.len();
+
+                vec![format!(
+                    "p.{}(\"{piece}\")",
+                    if i == 0 { "starts_with" } else { "contains" }
+                )]
+            })
+            .collect();
+
+        conditions.push(format!("p.len() > {length}"));
+
+        format!("p if {}", conditions.join(" && "))
     }
 
     fn is_mod(&self) -> bool {
@@ -118,7 +152,7 @@ impl Route {
     }
 
     fn handler(&self) -> Option<String> {
-        let mut handler = format!("\"{}\" => ", self.route_path(),);
+        let mut handler = format!("{} => ", self.route_matcher());
 
         let mod_path = format!(
             "{}::",

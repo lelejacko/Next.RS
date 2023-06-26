@@ -1,7 +1,8 @@
-pub static DEFINES: &str = stringify! { // <=
-$modules // <=
+pub static DEFINES: &str = stringify! { // d
+$modules // d
 
 use std::{
+    collections::HashMap,
     fmt::Display,
     io::{BufRead, BufReader, Error, Read, Write},
     net::{TcpListener, TcpStream},
@@ -53,6 +54,28 @@ pub struct Request {
     pub body: Option<String>,
 }
 
+impl Request {
+    pub fn query_params(&self) -> Option<HashMap<String, String>> {
+        if !self.path.contains("?") {
+            return None;
+        }
+
+        let (_, params_string) = self.path.rsplit_once("?").unwrap();
+        let mut query_params: HashMap<String, String> = HashMap::new();
+
+        for param in params_string.split("&") {
+            if !param.contains("=") {
+                continue;
+            }
+
+            let split_param: Vec<_> = param.split("=").collect();
+            query_params.insert(String::from(split_param[0]), String::from(split_param[1]));
+        }
+
+        Some(query_params)
+    }
+}
+
 #[derive(Debug)]
 pub struct Response {
     pub code: u16,
@@ -74,7 +97,7 @@ fn handle(req: Request) -> Response {
     let clean_path = req.path.split("?").collect::<Vec<_>>()[0].trim_matches('/');
 
     match clean_path {
-        $handlers // <=
+        $handlers // d
         _ => Response {
             code: 404,
             headers: None,
@@ -144,11 +167,15 @@ impl WebServer {
             #[cfg(debug_assertions)]
             println!("{:?} {} => {}", method, path, response.code);
 
-            let mut res = format!("HTTP/1.1 {}", response.code).as_bytes().to_vec();
+            let mut res = format!("HTTP/1.1 {}\r\n", response.code)
+                .as_bytes()
+                .to_vec();
 
             if let Some(mut headers) = response.headers {
                 res.append(&mut headers);
             }
+
+            res.append(&mut b"\r\n".to_vec());
 
             if let Some(mut body) = response.body {
                 res.append(&mut body);
@@ -206,4 +233,4 @@ impl WebServer {
         Some(Request { method, path, body })
     }
 }
-}; // <=
+}; // d
