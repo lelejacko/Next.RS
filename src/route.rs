@@ -127,16 +127,19 @@ impl Route {
         self.static_body.is_some()
     }
 
+    fn clean_name(&self, name: &str) -> String {
+        name.replace(".", "_")
+            .replace("-", "_")
+            .replace(",", "_")
+            .replace(";", "_")
+    }
+
     fn handler(&self) -> Option<String> {
         let mut handler = format!("{} => ", self.route_matcher());
 
         let mod_path = format!(
             "{}::",
-            self.clean_path()
-                .split("/")
-                .collect::<Vec<_>>()
-                .join("::")
-                .replace(".", "_")
+            self.clean_name(&self.clean_path().split("/").collect::<Vec<_>>().join("::"))
         );
 
         if self.is_api() {
@@ -158,8 +161,7 @@ impl Route {
 
     fn mod_name(&self) -> String {
         let clean_path = self.clean_path();
-        let split_path: Vec<_> = clean_path.split("/").collect();
-        String::from(split_path[split_path.len() - 1]).replace(".", "_")
+        self.clean_name(clean_path.rsplit_once("/").unwrap_or(("", &clean_path)).1)
     }
 
     pub fn get_mod(&self) -> String {

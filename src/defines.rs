@@ -220,7 +220,7 @@ impl WebServer {
                 res.append(&mut headers);
             }
 
-            res.append(&mut b"\r\n".to_vec());
+            res.append(&mut b"\r\n\r\n".to_vec());
 
             if let Some(mut body) = response.body {
                 res.append(&mut body);
