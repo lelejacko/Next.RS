@@ -1,5 +1,5 @@
-pub static DEFINES: &str = stringify! { // d
-$modules // d
+pub static DEFINES: &str = stringify! { // <=
+$modules // <=
 
 use std::{
     collections::HashMap,
@@ -52,6 +52,7 @@ pub struct Request {
     pub method: ReqMethod,
     pub path: String,
     pub body: Option<String>,
+    pub dyn_fields: Option<HashMap<String, String>>,
 }
 
 impl Request {
@@ -93,11 +94,55 @@ impl Response {
     }
 }
 
-fn handle(req: Request) -> Response {
-    let clean_path = req.path.split("?").collect::<Vec<_>>()[0].trim_matches('/');
+fn get_dynamic_fields(path: &str, dynamic_route: &str) -> Option<HashMap<String, String>> {
+    let mut dyn_fields: HashMap<String, String> = HashMap::new();
+
+    for (i, s) in dynamic_route.split("__").enumerate() {
+        let (field, matcher) = if i == 0 {
+            ("", s)
+        } else {
+            s.split_once("/").unwrap_or((s, ""))
+        };
+
+        if !path.contains(matcher) {
+            return None;
+        }
+
+        if field.is_empty() {
+            continue;
+        }
+
+        let mut value = if matcher.is_empty() {
+            path
+        } else {
+            path.split_once(matcher).unwrap_or(("", "")).0
+        };
+
+        if value.contains("/") {
+            value = value.trim_matches('/').rsplit_once("/").unwrap().1;
+        }
+
+        if value.is_empty() {
+            return None;
+        }
+
+        dyn_fields.insert(String::from(field), String::from(value));
+    }
+
+    Some(dyn_fields)
+}
+
+fn matches_dynamic_route(path: &str, dynamic_route: &str, req: &mut Request) -> bool {
+    req.dyn_fields = get_dynamic_fields(path, dynamic_route);
+    req.dyn_fields.is_some()
+}
+
+fn handle(mut req: Request) -> Response {
+    let req_path = req.path.clone();
+    let clean_path = req_path.split("?").collect::<Vec<_>>()[0].trim_matches('/');
 
     match clean_path {
-        $handlers // d
+        $handlers // <=
         _ => Response {
             code: 404,
             headers: None,
@@ -155,7 +200,7 @@ impl WebServer {
 
         let mut stream = connection.unwrap();
 
-        if let Some(request) = Self::read_request(&mut stream) {
+        if let Some(mut request) = Self::read_request(&mut stream) {
             #[cfg(debug_assertions)]
             let method = request.method.clone();
 
@@ -230,7 +275,12 @@ impl WebServer {
             Some(content)
         };
 
-        Some(Request { method, path, body })
+        Some(Request {
+            method,
+            path,
+            body,
+            dyn_fields: None,
+        })
     }
 }
-}; // d
+}; // <=
