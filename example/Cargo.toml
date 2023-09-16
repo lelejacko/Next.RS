@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-next-rs = { path = ".." }
-tokio = "1.32.0"
-serde_json = "1.0.106"
+next_rs = { path = ".." }
+serde_json = "^1.0.107"
+tokio = "^1.32.0"

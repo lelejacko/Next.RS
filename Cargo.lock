@@ -81,7 +81,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "next-rs"
+name = "next_rs"
 version = "0.1.0"
 dependencies = [
  "serde_json",

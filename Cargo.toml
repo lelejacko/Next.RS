@@ -1,5 +1,5 @@
 [package]
-name = "next-rs"
+name = "next_rs"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,5 +7,5 @@ edition = "2021"
 proc-macro = true
 
 [dependencies]
-serde_json = "1.0.107"
-tokio = "1.32.0"
+serde_json = "^1.0.107"
+tokio = "^1.32.0"
