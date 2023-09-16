@@ -1,6 +1,7 @@
-use crate::{Request, Response};
+use crate::{json_response, ReqMethod, Request, Response};
 
-pub fn handler(req: Request) -> Response {
-    println!("{:?}", req.dyn_fields);
-    Response::from_string(200, None, Some(&format!("Hi from {}", req.path)))
+pub async fn handler(req: Request) -> Result<Response, Response> {
+    req.allow_methods(vec![ReqMethod::Get])?;
+
+    Ok(json_response!(200, {"message": "Welcome"}))
 }

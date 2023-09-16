@@ -9,7 +9,9 @@ use std::{
     thread::{spawn, JoinHandle},
 };
 
-#[derive(Debug, Clone)]
+use tokio::runtime::Runtime;
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum ReqMethod {
     Get,
     Patch,
@@ -52,6 +54,7 @@ pub struct Request {
     pub method: ReqMethod,
     pub path: String,
     pub body: Option<String>,
+    pub headers: Vec<String>,
     pub dyn_fields: Option<HashMap<String, String>>,
 }
 
@@ -74,6 +77,14 @@ impl Request {
         }
 
         Some(query_params)
+    }
+
+    pub fn allow_methods(&self, methods: Vec<ReqMethod>) -> Result<(), Response> {
+        if methods.contains(&self.method) {
+            return Ok(());
+        }
+
+        Err(json_response!(400, {"message": "Method not allowed"}))
     }
 }
 
@@ -137,17 +148,18 @@ fn matches_dynamic_route(path: &str, dynamic_route: &str, req: &mut Request) -> 
     req.dyn_fields.is_some()
 }
 
-fn handle(mut req: Request) -> Response {
+async fn handle(mut req: Request) -> Response {
     let req_path = req.path.clone();
     let clean_path = req_path.split("?").collect::<Vec<_>>()[0].trim_matches('/');
 
-    match clean_path {
+    let response = match clean_path {
         $handlers // <=
-        _ => Response {
-            code: 404,
-            headers: None,
-            body: Some(b"Not found".to_vec()),
-        },
+        _ => Err(json_response!(400, {"message": "Not found"})),
+    };
+
+    match response {
+        Ok(r) => r,
+        Err(r) => r,
     }
 }
 
@@ -180,34 +192,44 @@ impl Drop for ThreadPool {
     }
 }
 
-struct WebServer;
+pub struct WebServer {
+    pub listener: TcpListener,
+    pool: ThreadPool,
+}
 
 impl WebServer {
-    pub fn start(port: u16) {
+    pub fn new(port: u16) -> Self {
         let listener = TcpListener::bind(format!("0.0.0.0:{port}")).unwrap();
-
         let mut pool = ThreadPool::new();
 
-        for connection in listener.incoming() {
-            pool.add(|| Self::handle_connection(connection));
+        WebServer { listener, pool }
+    }
+
+    pub fn start(mut self) {
+        for connection in self.listener.incoming() {
+            self.pool.add(|| {
+                Runtime::new()
+                    .unwrap()
+                    .block_on(async { Self::handle_connection(connection).await })
+            });
         }
     }
 
-    fn handle_connection(connection: Result<TcpStream, Error>) {
+    async fn handle_connection(connection: Result<TcpStream, Error>) {
         if connection.is_err() {
             return;
         }
 
         let mut stream = connection.unwrap();
 
-        if let Some(mut request) = Self::read_request(&mut stream) {
+        if let Some(request) = Self::read_request(&mut stream) {
             #[cfg(debug_assertions)]
             let method = request.method.clone();
 
             #[cfg(debug_assertions)]
             let path = request.path.clone();
 
-            let response = handle(request);
+            let response = handle(request).await;
 
             #[cfg(debug_assertions)]
             println!("{:?} {} => {}", method, path, response.code);
@@ -279,8 +301,25 @@ impl WebServer {
             method,
             path,
             body,
+            headers,
             dyn_fields: None,
         })
     }
 }
+
+macro_rules! json_response {
+    (
+        $code:expr,
+        $body:tt$(,)?
+    ) => {
+        Response::from_string(
+            $code,
+            Some("Content-Type=application/json"),
+            Some(serde_json::json!($body).as_str().unwrap()),
+        )
+    };
+}
+
+pub(crate) use json_response;
+
 }; // <=

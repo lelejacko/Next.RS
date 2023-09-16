@@ -1,13 +1,11 @@
-use {
-    crate::mime_type::MimeType,
-    std::{
-        cmp::Ordering,
-        fs::{metadata, read, read_dir, read_to_string},
-        process::exit,
-    },
+use super::mime_type::MimeType;
+use std::{
+    cmp::Ordering,
+    fs::{metadata, read, read_dir, read_to_string},
+    process::{exit, Command},
 };
 
-pub static ROUTES_PATH: &str = "src/routes";
+static ROUTES_DIR: &str = "routes";
 
 #[derive(Debug)]
 pub struct Route {
@@ -26,7 +24,6 @@ impl Route {
         if metadata(&path).unwrap().is_dir() {
             children = Some(Self::get_children(&path));
         } else if !path.ends_with(".rs") {
-            // TODO: map as bytes
             static_body = Some(read(&path).unwrap());
 
             let split_path = path.split(".").collect::<Vec<_>>();
@@ -44,8 +41,22 @@ impl Route {
     }
 
     pub fn base() -> Self {
-        Self::check_is_dir(&ROUTES_PATH);
-        Self::new(String::from(ROUTES_PATH))
+        let output = String::from_utf8(
+            Command::new("find")
+                .args([".", "|", "grep", ROUTES_DIR])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap();
+
+        let routes_path = output
+            .split('\n')
+            .find(|l| l.ends_with(ROUTES_DIR))
+            .map_or(String::new(), |l| l.replace("./", ""));
+
+        Self::check_is_dir(&routes_path);
+        Self::new(String::from(routes_path))
     }
 
     fn check_is_dir(path: &str) {
@@ -80,9 +91,9 @@ impl Route {
     }
 
     fn clean_path(&self) -> String {
-        self.path
-            .replace("src", "")
-            .replace(".rs", "")
+        let path = String::from(ROUTES_DIR) + self.path.split(ROUTES_DIR).collect::<Vec<_>>()[1];
+
+        path.replace(".rs", "")
             .replace("/mod", "/r#mod")
             .trim_matches('/')
             .to_string()
@@ -92,7 +103,6 @@ impl Route {
         let clean_path = format!(
             "\"{}\"",
             self.clean_path()
-                .replace("routes", "")
                 .replace("r#mod", "")
                 .replace("index.html", "")
                 .trim_matches('/')
@@ -115,7 +125,7 @@ impl Route {
     fn has_handler(&self) -> bool {
         metadata(&self.path).unwrap().is_file() && {
             let content = read_to_string(&self.path).unwrap();
-            content.contains("pub fn handler(")
+            content.contains("pub async fn handler(")
         }
     }
 
@@ -143,14 +153,14 @@ impl Route {
         );
 
         if self.is_api() {
-            handler += &format!("{mod_path}handler(req)");
+            handler += &format!("{mod_path}handler(req).await");
         } else if self.is_static() {
             handler += &format!(
-                "Response {{
+                "Ok(Response {{
                     code: 200, 
                     headers: Some({mod_path}HEADERS.to_vec()), 
                     body: Some({mod_path}BODY.to_vec())
-                }}"
+                }})"
             );
         } else {
             return None;

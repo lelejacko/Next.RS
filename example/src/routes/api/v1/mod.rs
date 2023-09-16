@@ -1,5 +1,11 @@
-use crate::{Request, Response};
+use crate::{ReqMethod, Request, Response};
 
-pub fn handler(req: Request) -> Response {
-    Response::from_string(200, None, Some(&format!("Hi from {}", req.path)))
+pub async fn handler(req: Request) -> Result<Response, Response> {
+    req.allow_methods(vec![ReqMethod::Get])?;
+
+    Ok(Response::from_string(
+        200,
+        None,
+        Some(&format!("Hi from {}", req.path)),
+    ))
 }

@@ -5,10 +5,5 @@ edition = "2021"
 
 [dependencies]
 next-rs = { path = ".." }
-
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-panic = 'abort'
-strip = true
+tokio = "1.32.0"
+serde_json = "1.0.106"
