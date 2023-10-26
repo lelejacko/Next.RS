@@ -103,6 +103,7 @@ impl Route {
         let clean_path = format!(
             "\"{}\"",
             self.clean_path()
+                .replacen(ROUTES_DIR, "", 1)
                 .replace("r#mod", "")
                 .replace("index.html", "")
                 .trim_matches('/')
@@ -169,13 +170,25 @@ impl Route {
         Some(handler + ",")
     }
 
+    fn mod_path(&self) -> String {
+        self.path
+            .rsplit_once("/")
+            .unwrap_or(("", &self.path))
+            .1
+            .to_string()
+    }
+
     fn mod_name(&self) -> String {
         let clean_path = self.clean_path();
         self.clean_name(clean_path.rsplit_once("/").unwrap_or(("", &clean_path)).1)
     }
 
     pub fn get_mod(&self) -> String {
-        let mut mod_str = format!("pub mod {}", self.mod_name());
+        let mut mod_str = format!(
+            "#[path = \"{}\"]\npub mod {}",
+            self.mod_path(),
+            self.mod_name(),
+        );
 
         if let Some(children) = &self.children {
             let sub_mods = &children

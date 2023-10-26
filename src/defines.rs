@@ -154,7 +154,7 @@ async fn handle(mut req: Request) -> Response {
 
     let response = match clean_path {
         $handlers // <=
-        _ => Err(json_response!(400, {"message": "Not found"})),
+        _ => Err(json_response!(404, {"message": "Not found"})),
     };
 
     match response {
@@ -315,7 +315,7 @@ macro_rules! json_response {
         Response::from_string(
             $code,
             Some("Content-Type=application/json"),
-            Some(serde_json::json!($body).as_str().unwrap()),
+            Some(&serde_json::json!($body).to_string()),
         )
     };
 }
