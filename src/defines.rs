@@ -18,6 +18,10 @@ pub enum ReqMethod {
     Post,
     Put,
     Delete,
+    Options,
+    Head,
+    Trace,
+    Connect,
 }
 
 impl ReqMethod {
@@ -28,6 +32,10 @@ impl ReqMethod {
             "POST" => ReqMethod::Post,
             "PUT" => ReqMethod::Put,
             "DELETE" => ReqMethod::Delete,
+            "OPTIONS" => ReqMethod::Options,
+            "HEAD" => ReqMethod::Head,
+            "TRACE" => ReqMethod::Trace,
+            "CONNECT" => ReqMethod::Connect,
             _ => panic!("Invalid method"),
         }
     }
@@ -44,6 +52,10 @@ impl Display for ReqMethod {
                 ReqMethod::Post => "POST",
                 ReqMethod::Put => "PUT",
                 ReqMethod::Delete => "DELETE",
+                ReqMethod::Options => "OPTIONS",
+                ReqMethod::Head => "HEAD",
+                ReqMethod::Trace => "TRACE",
+                ReqMethod::Connect => "CONNECT",
             }
         )
     }
