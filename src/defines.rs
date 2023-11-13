@@ -1,15 +1,37 @@
 pub static DEFINES: &str = stringify! { // <=
 $modules // <=
 
+use engineioxide::service::NotFoundService;
+use futures::{executor, future::ready};
+use http_body::Body as HttpBody;
+use hyper::{
+    body::Bytes,
+    header::HeaderValue,
+    service::{make_service_fn, service_fn, Service},
+    Body, Request as HyperRequest, Response as HyperResponse, Server,
+};
+use lazy_static::lazy_static;
+use serde_json::Value;
+use socketioxide::{adapter::LocalAdapter, service::SocketIoService, Socket, SocketIo};
 use std::{
     collections::HashMap,
+    convert::Infallible,
     fmt::Display,
-    io::{BufRead, BufReader, Error, Read, Write},
-    net::{TcpListener, TcpStream},
-    thread::{spawn, JoinHandle},
+    net::SocketAddr,
+    str::FromStr,
+    sync::{Arc, Mutex},
 };
 
-use tokio::runtime::Runtime;
+type SocketIOService = SocketIoService<LocalAdapter, NotFoundService>;
+
+lazy_static! {
+    static ref SOCKET_SERVICE: (Mutex<SocketIOService>, SocketIo) = {
+        let (service, io) = SocketIo::builder().build_svc();
+        (Mutex::new(service), io)
+    };
+    static ref SOCKETS: Mutex<HashMap<String, Arc<Socket<LocalAdapter>>>> =
+        Mutex::new(HashMap::new());
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReqMethod {
@@ -160,6 +182,31 @@ fn matches_dynamic_route(path: &str, dynamic_route: &str, req: &mut Request) -> 
     req.dyn_fields.is_some()
 }
 
+fn get_sio_service() -> SocketIOService {
+    SOCKET_SERVICE.0.lock().unwrap().to_owned()
+}
+
+async fn handle_sio_request(req: HyperRequest<Body>) -> Result<HyperResponse<Body>, Infallible> {
+    get_sio_service().call(req).await.map(|mut res| {
+        // Response mapping
+        let mut response = HyperResponse::builder();
+
+        response = response.status(res.status());
+        response = response.version(res.version());
+
+        for header in res.headers() {
+            response = response.header(header.0, header.1)
+        }
+
+        let body = Body::from(
+            executor::block_on(res.data())
+                .unwrap_or(Ok(Bytes::default()))
+                .unwrap(),
+        );
+        response.body(body).unwrap()
+    })
+}
+
 async fn handle(mut req: Request) -> Response {
     let req_path = req.path.clone();
     let clean_path = req_path.split("?").collect::<Vec<_>>()[0].trim_matches('/');
@@ -175,147 +222,149 @@ async fn handle(mut req: Request) -> Response {
     }
 }
 
-struct ThreadPool {
-    threads: Vec<Option<JoinHandle<()>>>,
-}
+async fn handle_std_request(
+    mut req: HyperRequest<Body>,
+) -> Result<HyperResponse<Body>, Infallible> {
+    let mut request = Request {
+        method: ReqMethod::from(&req.method().to_string()),
+        path: req.uri().to_string(),
+        body: req.body_mut().data().await.map_or(None, |res| {
+            res.map_or(None, |body| String::from_utf8(body.to_vec()).ok())
+        }),
+        headers: req
+            .headers()
+            .iter()
+            .map(|h| format!("{}: {}", h.0, h.1.to_str().unwrap_or("")))
+            .collect(),
+        dyn_fields: None,
+    };
 
-impl ThreadPool {
-    fn new() -> Self {
-        let threads = vec![];
-        ThreadPool { threads }
-    }
+    #[cfg(debug_assertions)]
+    let method = request.method.clone();
+    let path = request.path.clone();
 
-    fn add<F>(&mut self, job: F)
-    where
-        F: FnOnce() -> (),
-        F: Send + 'static,
-    {
-        self.threads.push(Some(spawn(job)));
-    }
-}
+    let response = handle(request).await;
 
-impl Drop for ThreadPool {
-    fn drop(&mut self) {
-        for thread in &mut self.threads {
-            if let Some(t) = thread.take() {
-                t.join().unwrap();
+    #[cfg(debug_assertions)]
+    println!("{} {} → {}", method, path, response.code);
+
+    let mut res = HyperResponse::builder().status(response.code);
+
+    if let Some(hdrs) = response.headers {
+        if let Some(headers) = String::from_utf8(hdrs).ok() {
+            for header in headers.split("\n") {
+                if let Some((key, value)) = header.split_once("=") {
+                    res = res.header(key, value)
+                }
             }
         }
     }
+
+    let mut res_body = Body::empty();
+    if let Some(b) = response.body {
+        if let Some(body) = String::from_utf8(b).ok() {
+            res_body = Body::from(body);
+        }
+    }
+
+    Ok(res.body(res_body).unwrap())
+}
+
+async fn handle_request(req: HyperRequest<Body>) -> Result<HyperResponse<Body>, Infallible> {
+    let result = match (req.uri().path(), req.headers().contains_key("Upgrade")) {
+        (path, header) if header || ["/socket.io", "/ws"].iter().any(|p| path.starts_with(p)) => {
+            handle_sio_request(req).await
+        }
+        _ => handle_std_request(req).await,
+    };
+
+    result.map(|mut res| {
+        let headers = res.headers_mut();
+        headers.insert("Access-Control-Allow-Origin", HeaderValue::from_static("*"));
+        headers.insert(
+            "Access-Control-Allow-Methods",
+            HeaderValue::from_static("GET, POST, PATCH, PUT, DELETE, OPTIONS"),
+        );
+        headers.insert(
+            "Access-Control-Allow-Headers",
+            HeaderValue::from_static(
+                "Origin, X-Requested-With, Content-Type, Accept, authorization",
+            ),
+        );
+
+        res
+    })
 }
 
 pub struct WebServer {
-    pub listener: TcpListener,
-    pool: ThreadPool,
+    pub address: SocketAddr,
 }
 
 impl WebServer {
     pub fn new(port: u16) -> Self {
-        let listener = TcpListener::bind(format!("0.0.0.0:{port}")).unwrap();
-        let mut pool = ThreadPool::new();
+        let address = SocketAddr::from_str(&format!("0.0.0.0:{port}")).unwrap();
 
-        WebServer { listener, pool }
+        WebServer { address }
     }
 
-    pub fn start(mut self) {
-        for connection in self.listener.incoming() {
-            self.pool.add(|| {
-                Runtime::new()
+    pub async fn start(&self) {
+        let make_svc =
+            make_service_fn(move |_| ready(Ok::<_, Infallible>(service_fn(handle_request))));
+        let server = Server::bind(&self.address).serve(make_svc);
+
+        if let Err(e) = server.await {
+            eprintln!("Server error: {e}")
+        }
+    }
+}
+
+pub struct SocketIO;
+
+impl SocketIO {
+    // TODO: add namespace handling
+
+    pub fn add_ns(namespace: &str) {
+        SOCKET_SERVICE
+            .1
+            .ns(namespace, |socket, auth: Value| async move {
+                #[cfg(debug_assertions)]
+                println!("Socket.IO connected: {:?} {:?}", socket.ns(), socket.id);
+                socket.emit("auth", auth).ok();
+
+                socket.on("message", |socket, data: Value, bin, _| async move {
+                    #[cfg(debug_assertions)]
+                    println!("Received event: {:?} {:?}", data, bin);
+                    socket.bin(bin).emit("message-back", data).ok();
+                });
+
+                socket.on("message-with-ack", |_, data: Value, bin, ack| async move {
+                    #[cfg(debug_assertions)]
+                    println!("Received event: {:?} {:?}", data, bin);
+                    ack.bin(bin).send(data).ok();
+                });
+
+                socket.on_disconnect(|socket, reason| async move {
+                    SOCKETS.lock().unwrap().remove(&socket.id.to_string());
+                    #[cfg(debug_assertions)]
+                    println!("Socket.IO disconnected: {} {}", socket.id, reason);
+                });
+
+                SOCKETS
+                    .lock()
                     .unwrap()
-                    .block_on(async { Self::handle_connection(connection).await })
+                    .insert(socket.id.to_string(), socket);
             });
-        }
     }
 
-    async fn handle_connection(connection: Result<TcpStream, Error>) {
-        if connection.is_err() {
-            return;
-        }
+    pub fn emit(namespace: &str, topic: &str, data: Value) {
+        #[cfg(debug_assertions)]
+        println!("Emitting on namespace {namespace} topic {topic} → {data}");
 
-        let mut stream = connection.unwrap();
-
-        if let Some(request) = Self::read_request(&mut stream) {
-            #[cfg(debug_assertions)]
-            let method = request.method.clone();
-
-            #[cfg(debug_assertions)]
-            let path = request.path.clone();
-
-            let response = handle(request).await;
-
-            #[cfg(debug_assertions)]
-            println!("{:?} {} => {}", method, path, response.code);
-
-            let mut res = format!("HTTP/1.1 {}\r\n", response.code)
-                .as_bytes()
-                .to_vec();
-
-            if let Some(mut headers) = response.headers {
-                res.append(&mut headers);
+        for socket in SOCKETS.lock().unwrap().values() {
+            if socket.ns() == namespace {
+                socket.emit(topic, data.clone()).ok();
             }
-
-            res.append(&mut b"\r\n\r\n".to_vec());
-
-            if let Some(mut body) = response.body {
-                res.append(&mut body);
-            }
-
-            stream.write_all(&res).unwrap();
         }
-    }
-
-    fn read_request(stream: &mut TcpStream) -> Option<Request> {
-        let mut reader = BufReader::new(stream);
-
-        let mut headers: Vec<String> = vec![];
-        loop {
-            let mut line = String::new();
-
-            match reader.read_line(&mut line) {
-                Ok(length) => {
-                    if length < 3 {
-                        break;
-                    }
-                }
-                Err(e) => {
-                    println!("{e}");
-                    return None;
-                }
-            }
-
-            headers.push(line);
-        }
-
-        let first_header: Vec<_> = headers[0].split(" ").collect();
-        let method = ReqMethod::from(first_header[0]);
-        let path = String::from(first_header[1]);
-
-        let mut content = String::new();
-        if let Some(l) = headers.iter().find(|l| l.starts_with("Content-Length")) {
-            let content_length = l.split(":").collect::<Vec<_>>()[1]
-                .trim()
-                .parse::<usize>()
-                .unwrap();
-
-            let mut bytes = vec![0; content_length];
-            reader.read_exact(&mut bytes).unwrap();
-
-            content = String::from_utf8(bytes).unwrap_or(content);
-        }
-
-        let body = if content.is_empty() {
-            None
-        } else {
-            Some(content)
-        };
-
-        Some(Request {
-            method,
-            path,
-            body,
-            headers,
-            dyn_fields: None,
-        })
     }
 }
 
