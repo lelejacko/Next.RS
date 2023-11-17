@@ -6,6 +6,10 @@ edition = "2021"
 [lib]
 proc-macro = true
 
+[[example]]
+name = "test_server"
+path = "example/src/main.rs"
+
 [dependencies]
 engineioxide = "0.6.0"
 futures = "0.3.29"

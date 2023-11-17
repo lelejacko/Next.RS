@@ -312,6 +312,9 @@ impl WebServer {
             make_service_fn(move |_| ready(Ok::<_, Infallible>(service_fn(handle_request))));
         let server = Server::bind(&self.address).serve(make_svc);
 
+        #[cfg(debug_assertions)]
+        println!("> Server running at http://{}", self.address);
+
         if let Err(e) = server.await {
             eprintln!("Server error: {e}")
         }
