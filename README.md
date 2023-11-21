@@ -9,6 +9,20 @@ NextRS is a web backend framework.
 - **Query params parsing**. Query parameters can be accessed as an `HashMap` object with through the `Request.query_params()` method
 - `socket.io` handling on the same `HTTP` port.
 
+### To install:
+Add the following dependencies to your `Cargo.toml`:
+```toml
+next_rs = { git = "https://github.com/lelejacko/Next.RS.git" }
+engineioxide = "0.6.0"
+futures = "0.3.29"
+http-body = "0.4.5"
+hyper = { version = "0.14.27", features = ["full"] }
+lazy_static = "1.4.0"
+serde_json = "^1.0.107"
+socketioxide = "0.6.0"
+tokio = { version = "^1.33.0", features = ["macros", "rt-multi-thread"] }
+```
+
 ### Example
 - File: `src/main.rs`
     ```rust
