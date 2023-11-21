@@ -33,6 +33,7 @@ lazy_static! {
         Mutex::new(HashMap::new());
 }
 
+/// HTTP request method
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReqMethod {
     Get,
@@ -83,16 +84,27 @@ impl Display for ReqMethod {
     }
 }
 
+/// An HTTP Request
 #[derive(Debug)]
 pub struct Request {
     pub method: ReqMethod,
     pub path: String,
     pub body: Option<String>,
     pub headers: Vec<String>,
+
+    /// If the path is matched against a dynamic route, the
+    /// values of the dynamic fields are stored in this property.
+    ///
+    /// For example:
+    /// If an API handler is created in `src/routes/api/books/__id.rs`
+    /// all requests made to `/api/books/<id>` will be passed to this handler.
+    /// The requests passed to this handler will have their `dyn_fields`
+    /// property set to `Some({"id": "<id>"})`.
     pub dyn_fields: Option<HashMap<String, String>>,
 }
 
 impl Request {
+    /// Get the request 'query parameters'
     pub fn query_params(&self) -> Option<HashMap<String, String>> {
         if !self.path.contains("?") {
             return None;
@@ -113,6 +125,21 @@ impl Request {
         Some(query_params)
     }
 
+    /// Allow only the specified methods on the handler, returning
+    /// `400 Bad request` if any other method is attempted.
+    ///
+    /// Example:
+    /// ```rust
+    /// pub async fn handler(req: Request) -> Result<Response, Response> {
+    ///     req.allow_methods(vec![ReqMethod::Get])?;
+    ///
+    ///     Ok(Response::from_string(
+    ///         200,
+    ///         None,
+    ///         Some(&format!("Hi from {}", req.path)),
+    ///     ))
+    /// }
+    /// ```
     pub fn allow_methods(&self, methods: Vec<ReqMethod>) -> Result<(), Response> {
         if methods.contains(&self.method) {
             return Ok(());
@@ -122,6 +149,7 @@ impl Request {
     }
 }
 
+/// An HTTP Response
 #[derive(Debug)]
 pub struct Response {
     pub code: u16,
@@ -130,6 +158,7 @@ pub struct Response {
 }
 
 impl Response {
+    /// Create a `Response` with the given `code`, `headers` and `body`
     pub fn from_string(code: u16, headers: Option<&str>, body: Option<&str>) -> Self {
         Response {
             code,
@@ -296,17 +325,24 @@ async fn handle_request(req: HyperRequest<Body>) -> Result<HyperResponse<Body>, 
     })
 }
 
+/// A web server (handling both `HTTP` and `socket.io` requests)
 pub struct WebServer {
     pub address: SocketAddr,
 }
 
 impl WebServer {
+    /// Create a new `WebServer` listening on the specified `port`.
+    ///
+    /// Currently only one instance should be created, because the `socket.io`
+    /// service is `static`: this means that all server instances would share the
+    /// same `socket.io` handling.
     pub fn new(port: u16) -> Self {
         let address = SocketAddr::from_str(&format!("0.0.0.0:{port}")).unwrap();
 
         WebServer { address }
     }
 
+    /// Start the server.
     pub async fn start(&self) {
         let make_svc =
             make_service_fn(move |_| ready(Ok::<_, Infallible>(service_fn(handle_request))));
@@ -321,30 +357,21 @@ impl WebServer {
     }
 }
 
+/// A struct to access the `socket.io` methods
 pub struct SocketIO;
 
 impl SocketIO {
     // TODO: add namespace handling
 
+    /// Create a given `namespace`, providing
+    /// default auth and disconnection handling
     pub fn add_ns(namespace: &str) {
         SOCKET_SERVICE
             .1
             .ns(namespace, |socket, auth: Value| async move {
                 #[cfg(debug_assertions)]
-                println!("Socket.IO connected: {:?} {:?}", socket.ns(), socket.id);
+                println!("`Socket.IO` connected: {:?} {:?}", socket.ns(), socket.id);
                 socket.emit("auth", auth).ok();
-
-                socket.on("message", |socket, data: Value, bin, _| async move {
-                    #[cfg(debug_assertions)]
-                    println!("Received event: {:?} {:?}", data, bin);
-                    socket.bin(bin).emit("message-back", data).ok();
-                });
-
-                socket.on("message-with-ack", |_, data: Value, bin, ack| async move {
-                    #[cfg(debug_assertions)]
-                    println!("Received event: {:?} {:?}", data, bin);
-                    ack.bin(bin).send(data).ok();
-                });
 
                 socket.on_disconnect(|socket, reason| async move {
                     SOCKETS.lock().unwrap().remove(&socket.id.to_string());
@@ -359,6 +386,7 @@ impl SocketIO {
             });
     }
 
+    /// Emit the given `data` on the specified `namespace` `topic`
     pub fn emit(namespace: &str, topic: &str, data: Value) {
         #[cfg(debug_assertions)]
         println!("Emitting on namespace {namespace} topic {topic} → {data}");
@@ -371,6 +399,7 @@ impl SocketIO {
     }
 }
 
+/// Create a json response
 macro_rules! json_response {
     (
         $code:expr,
