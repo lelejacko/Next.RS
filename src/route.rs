@@ -95,6 +95,7 @@ impl Route {
 
         path.replace(".rs", "")
             .replace("/mod", "/r#mod")
+            .replace("/super", "/_super")
             .trim_matches('/')
             .to_string()
     }
@@ -105,6 +106,7 @@ impl Route {
             self.clean_path()
                 .replacen(ROUTES_DIR, "", 1)
                 .replace("r#mod", "")
+                .replace("/_super", "/super")
                 .replace("index.html", "")
                 .trim_matches('/')
                 .to_string()
