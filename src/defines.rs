@@ -11,6 +11,7 @@ use hyper::{
     Body, Request as HyperRequest, Response as HyperResponse, Server,
 };
 use lazy_static::lazy_static;
+use regex::Regex;
 use serde_json::Value;
 use socketioxide::{adapter::LocalAdapter, service::SocketIoService, Socket, SocketIo};
 use std::{
@@ -31,6 +32,7 @@ lazy_static! {
     };
     static ref SOCKETS: Mutex<HashMap<String, Arc<Socket<LocalAdapter>>>> =
         Mutex::new(HashMap::new());
+    static ref DYN_FIELDS_REGEX: Regex = Regex::new(r"__(?P<field>\w+)").unwrap();
 }
 
 /// HTTP request method
@@ -169,41 +171,32 @@ impl Response {
 }
 
 fn get_dynamic_fields(path: &str, dynamic_route: &str) -> Option<HashMap<String, String>> {
-    let mut dyn_fields: HashMap<String, String> = HashMap::new();
+    let regex_src = DYN_FIELDS_REGEX
+        .replace_all(&("^".to_string() + dynamic_route + "$"), "(?P<$field>\\w+)")
+        .to_string();
 
-    for (i, s) in dynamic_route.split("__").enumerate() {
-        let (field, matcher) = if i == 0 {
-            ("", s)
-        } else {
-            s.split_once("/").unwrap_or((s, ""))
-        };
+    let regex = Regex::new(&regex_src).unwrap();
+    let path_match = regex.captures(path);
 
-        if !path.contains(matcher) {
-            return None;
-        }
-
-        if field.is_empty() {
-            continue;
-        }
-
-        let mut value = if matcher.is_empty() {
-            path
-        } else {
-            path.split_once(matcher).unwrap_or(("", "")).0
-        };
-
-        if value.contains("/") {
-            value = value.trim_matches('/').rsplit_once("/").unwrap().1;
-        }
-
-        if value.is_empty() {
-            return None;
-        }
-
-        dyn_fields.insert(String::from(field), String::from(value));
+    if path_match.is_none() {
+        return None;
     }
 
-    Some(dyn_fields)
+    let path_match = path_match.unwrap();
+
+    Some(
+        regex
+            .capture_names()
+            .skip(1)
+            .map(|cn| {
+                let name = cn.unwrap();
+                (
+                    name.to_string(),
+                    path_match.name(name).unwrap().as_str().to_string(),
+                )
+            })
+            .collect(),
+    )
 }
 
 fn matches_dynamic_route(path: &str, dynamic_route: &str, req: &mut Request) -> bool {
