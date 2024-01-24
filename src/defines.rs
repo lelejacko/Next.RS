@@ -147,6 +147,10 @@ impl Request {
             return Ok(());
         }
 
+        if self.method == ReqMethod::Options {
+            return Err(json_response!(200, ""));
+        }
+
         Err(json_response!(400, {"message": "Method not allowed"}))
     }
 }
