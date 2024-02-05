@@ -1,30 +1,50 @@
 use super::mime_type::MimeType;
+use lazy_static::lazy_static;
 use std::{
     cmp::Ordering,
-    fs::{metadata, read, read_dir, read_to_string},
+    fs::{metadata, read_dir, read_to_string},
     process::{exit, Command},
 };
 
 static ROUTES_DIR: &str = "routes";
 
+lazy_static! {
+    static ref ABSOLUTE_ROUTES_PATH: String = {
+        let output = String::from_utf8(
+            Command::new("sh")
+                .args(["-c", &format!("find ~+ . | grep {ROUTES_DIR}")])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap();
+
+        output
+            .split('\n')
+            .find(|l| l.ends_with(ROUTES_DIR))
+            .unwrap_or("")
+            .to_string()
+    };
+}
+
 #[derive(Debug)]
 pub struct Route {
     path: String,
     children: Option<Vec<Route>>,
-    static_body: Option<Vec<u8>>,
+    static_body: Option<String>,
     mime_type: Option<MimeType>,
 }
 
 impl Route {
     fn new(path: String) -> Self {
         let mut children: Option<Vec<Route>> = None;
-        let mut static_body: Option<Vec<u8>> = None;
+        let mut static_body: Option<String> = None;
         let mut mime_type: Option<MimeType> = None;
 
         if metadata(&path).unwrap().is_dir() {
             children = Some(Self::get_children(&path));
         } else if !path.ends_with(".rs") {
-            static_body = Some(read(&path).unwrap());
+            static_body = Some(format!("include_bytes!(\"{path}\")",));
 
             let split_path = path.split(".").collect::<Vec<_>>();
             if split_path.len() > 1 {
@@ -41,22 +61,8 @@ impl Route {
     }
 
     pub fn base() -> Self {
-        let output = String::from_utf8(
-            Command::new("find")
-                .args([".", "|", "grep", ROUTES_DIR])
-                .output()
-                .unwrap()
-                .stdout,
-        )
-        .unwrap();
-
-        let routes_path = output
-            .split('\n')
-            .find(|l| l.ends_with(ROUTES_DIR))
-            .map_or(String::new(), |l| l.replace("./", ""));
-
-        Self::check_is_dir(&routes_path);
-        Self::new(String::from(routes_path))
+        Self::check_is_dir(&*ABSOLUTE_ROUTES_PATH);
+        Self::new(ABSOLUTE_ROUTES_PATH.clone())
     }
 
     fn check_is_dir(path: &str) {
@@ -203,14 +209,14 @@ impl Route {
             mod_str += &format!(
                 "{{
                     pub static HEADERS: &[u8] = b\"{}\";
-                    pub static BODY: &[u8] = &{:?};
+                    pub static BODY: &[u8] = {};
                 }}",
                 if let Some(mime_type) = &self.mime_type {
                     format!("Content-Type={}", mime_type.get())
                 } else {
                     String::new()
                 },
-                self.static_body.as_ref().unwrap()
+                self.static_body.clone().unwrap()
             )
         } else {
             mod_str += ";";
