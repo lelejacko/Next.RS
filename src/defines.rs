@@ -286,12 +286,11 @@ async fn handle_std_request(
         }
     }
 
-    let mut res_body = Body::empty();
-    if let Some(b) = response.body {
-        if let Some(body) = String::from_utf8(b).ok() {
-            res_body = Body::from(body);
-        }
-    }
+    let res_body = if let Some(body) = response.body {
+        Body::from(body)
+    } else {
+        Body::empty()
+    };
 
     Ok(res.body(res_body).unwrap())
 }
