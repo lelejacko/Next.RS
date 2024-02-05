@@ -9,22 +9,35 @@ use std::{
 static ROUTES_DIR: &str = "routes";
 
 lazy_static! {
-    static ref ABSOLUTE_ROUTES_PATH: String = {
-        let output = String::from_utf8(
-            Command::new("sh")
-                .args(["-c", &format!("find ~+ . | grep -oP \"^/.*{ROUTES_DIR}$\"")])
-                .output()
-                .unwrap()
-                .stdout,
-        )
-        .unwrap();
-
-        output
-            .split('\n')
-            .find(|l| l.ends_with(ROUTES_DIR))
-            .unwrap_or("")
-            .to_string()
-    };
+    static ref ACTUAL_ROUTES_PATH: String = String::from_utf8(
+        Command::new("sh")
+            .args(["-c", &format!("find . | grep -oP \".*routes$\"")])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
+    static ref CALL_SITE_PATH: String = String::from_utf8(
+        Command::new("sh")
+            .args([
+                "-c",
+                "grep -Rw . -e \"make_server\\!\" | grep -oP \".*(?<=.rs)\" | grep -v target"
+            ])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .split_once('\n')
+    .unwrap()
+    .0
+    .rsplit_once('/')
+    .unwrap()
+    .0
+    .trim()
+    .to_string();
 }
 
 #[derive(Debug)]
@@ -44,7 +57,17 @@ impl Route {
         if metadata(&path).unwrap().is_dir() {
             children = Some(Self::get_children(&path));
         } else if !path.ends_with(".rs") {
-            static_body = Some(format!("include_bytes!(\"{path}\")",));
+            println!("Path: {path}\nCall site path: {}", &*CALL_SITE_PATH);
+
+            let relative_path = if path.contains(&*CALL_SITE_PATH) {
+                path.replace(&*CALL_SITE_PATH, "")
+                    .trim_start_matches('/')
+                    .to_string()
+            } else {
+                panic!("'routes' folder and the 'make_server!' macro call must be in the same directory if there are static files.");
+            };
+
+            static_body = Some(format!("include_bytes!(\"{relative_path}\")",));
 
             let split_path = path.split(".").collect::<Vec<_>>();
             if split_path.len() > 1 {
@@ -61,8 +84,8 @@ impl Route {
     }
 
     pub fn base() -> Self {
-        Self::check_is_dir(&*ABSOLUTE_ROUTES_PATH);
-        Self::new(ABSOLUTE_ROUTES_PATH.clone())
+        Self::check_is_dir(&*ACTUAL_ROUTES_PATH);
+        Self::new(ACTUAL_ROUTES_PATH.clone())
     }
 
     fn check_is_dir(path: &str) {
