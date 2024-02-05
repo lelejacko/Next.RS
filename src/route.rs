@@ -12,7 +12,7 @@ lazy_static! {
     static ref ABSOLUTE_ROUTES_PATH: String = {
         let output = String::from_utf8(
             Command::new("sh")
-                .args(["-c", &format!("find ~+ . | grep {ROUTES_DIR}")])
+                .args(["-c", &format!("find ~+ . | grep -oP \"^/.*{ROUTES_DIR}$\"")])
                 .output()
                 .unwrap()
                 .stdout,
