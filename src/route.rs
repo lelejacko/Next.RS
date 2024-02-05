@@ -229,8 +229,8 @@ impl Route {
         } else if self.is_static() {
             mod_str += &format!(
                 "{{
-                    pub static HEADERS: &[u8] = b\"{}\";
-                    pub static BODY: &[u8] = {};
+                    pub static HEADERS: &'static [u8] = b\"{}\";
+                    pub static BODY: &'static [u8] = {};
                 }}",
                 if let Some(mime_type) = &self.mime_type {
                     format!("Content-Type={}", mime_type.get())
