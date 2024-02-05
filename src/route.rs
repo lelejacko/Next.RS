@@ -68,11 +68,9 @@ impl Route {
             };
 
             static_body = Some(format!("include_bytes!(\"{relative_path}\")",));
-
-            let split_path = path.split(".").collect::<Vec<_>>();
-            if split_path.len() > 1 {
-                mime_type = MimeType::from(split_path[1]);
-            }
+            mime_type = path
+                .rsplit_once('.')
+                .map_or(None, |(_, ext)| MimeType::from(ext));
         }
 
         Route {
