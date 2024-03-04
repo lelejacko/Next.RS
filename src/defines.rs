@@ -103,6 +103,7 @@ pub struct Request {
     /// The requests passed to this handler will have their `dyn_fields`
     /// property set to `Some({"id": "<id>"})`.
     pub dyn_fields: Option<HashMap<String, String>>,
+    pub hyper_req: HyperRequest<Body>,
 }
 
 impl Request {
@@ -263,6 +264,7 @@ async fn handle_std_request(
             .map(|h| format!("{}: {}", h.0, h.1.to_str().unwrap_or("")))
             .collect(),
         dyn_fields: None,
+        hyper_req: req,
     };
 
     #[cfg(debug_assertions)]
