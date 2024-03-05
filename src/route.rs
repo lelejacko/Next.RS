@@ -153,7 +153,7 @@ impl Route {
     fn has_handler(&self) -> bool {
         metadata(&self.path).unwrap().is_file() && {
             let content = read_to_string(&self.path).unwrap();
-            content.contains("pub async fn handler(")
+            content.contains("pub async fn handler<")
         }
     }
 
