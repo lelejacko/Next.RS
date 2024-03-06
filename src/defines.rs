@@ -24,7 +24,14 @@ use socketioxide::{
     SocketIo,
 };
 use std::{
-    collections::HashMap, convert::Infallible, fmt::Display, net::SocketAddr, str::FromStr,
+    collections::HashMap,
+    convert::Infallible,
+    fmt::Display,
+    fs::{metadata, File},
+    io::Write,
+    net::SocketAddr,
+    path::Path,
+    str::FromStr,
     sync::Mutex,
 };
 use tokio::net::TcpListener;
@@ -158,6 +165,48 @@ impl<'a> Request<'_> {
         }
 
         Err(json_response!(400, {"message": "Method not allowed"}))
+    }
+
+    /// Processes the multipart body of the request,
+    /// uploading the files to the specified `dest`ination.
+    /// The resulting Map contains the fields values and the
+    /// path of the uploaded files.
+    pub async fn process_upload<P>(self, dest: P) -> Result<HashMap<String, String>, Response>
+    where
+        P: AsRef<Path>,
+    {
+        if self.multipart_body.is_none() {
+            return Err(json_response!(400, {"message": "Bad request"}));
+        }
+
+        if !metadata(dest.as_ref()).map_or(false, |m| m.is_dir()) {
+            panic!("Speicified destination is not a directory");
+        }
+
+        let mut fields = HashMap::<String, String>::new();
+        let mut multipart_body = self.multipart_body.unwrap();
+
+        while let Some(mut field) = multipart_body.next_field().await.unwrap() {
+            let name = field.name().map(|n| n.to_string());
+            let file_name = field.file_name();
+
+            let value = if let Some(fname) = file_name {
+                let path = dest.as_ref().join(fname);
+                let mut file = File::create(&path).unwrap();
+
+                while let Some(chunk) = field.chunk().await.unwrap() {
+                    file.write(&chunk).ok();
+                }
+
+                path.to_str().unwrap().to_string()
+            } else {
+                field.text().await.unwrap_or("".to_string())
+            };
+
+            fields.insert(name.unwrap(), value);
+        }
+
+        Ok(fields)
     }
 }
 
