@@ -118,8 +118,8 @@ impl Route {
     fn clean_path(&self) -> String {
         let path = String::from(ROUTES_DIR) + self.path.split(ROUTES_DIR).collect::<Vec<_>>()[1];
 
-        path.replace(".rs", "")
-            .replace("/mod", "/r#mod")
+        path.replace("/mod.rs", "/r#mod.rs")
+            .replace(".rs", "")
             .replace("/super", "/_super")
             .trim_matches('/')
             .to_string()
