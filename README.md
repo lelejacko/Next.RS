@@ -3,7 +3,7 @@ NextRS is a web backend framework.
 
 ### Features:
 - **Filesystem based routes**. All files under `src/**/routes` folder are exposed:
-    - as API if the file is a `.rs` module exporting a `pub async fn handler` that takes a `Request` type parameter and returns a `Result<Response, Response>` object
+    - as API if the file is a `.rs` module exporting a `pub async fn handler<'a>` that takes a `Request<'a>` type parameter and returns a `Result<Response, Response>` object
     - as a static content in other cases
 - **Dynamic routes**. If a file or a directory under the `routes` folder starts with `"__"` it is used as a wildcard in routes matching (see the `Request.dyn_fields` property)
 - **Query params parsing**. Query parameters can be accessed as an `HashMap` object with through the `Request.query_params()` method
@@ -13,14 +13,17 @@ NextRS is a web backend framework.
 Add the following dependencies to your `Cargo.toml`:
 ```toml
 next_rs = { git = "https://github.com/lelejacko/Next.RS.git" }
-engineioxide = "0.6.0"
+bytes = "1.5.0"
+engineioxide = "0.10.2"
 futures = "0.3.29"
-http-body = "0.4.5"
-hyper = { version = "0.14.27", features = ["full"] }
+http-body-util = "0.1.0"
+hyper = { version = "1.2.0", features = ["full"] }
+hyper-util = { version = "0.1.3", features = ["tokio"] }
 lazy_static = "1.4.0"
+multer = "3.0.0"
 regex = "1.10.3"
 serde_json = "^1.0.107"
-socketioxide = "0.6.0"
+socketioxide = "0.10.2"
 tokio = { version = "^1.33.0", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -57,7 +60,7 @@ tokio = { version = "^1.33.0", features = ["macros", "rt-multi-thread"] }
 
     use crate::{ReqMethod, Request, Response};
 
-    pub async fn handler(req: Request) -> Result<Response, Response> {
+    pub async fn handler<'a>(req: Request<'a>) -> Result<Response, Response> {
         req.allow_methods(vec![ReqMethod::Get])?;
 
         Ok(Response::from_string(

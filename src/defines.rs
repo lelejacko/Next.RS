@@ -2,36 +2,48 @@ pub static DEFINES: &str = stringify! { // <=
 $modules // <=
 
 use engineioxide::service::NotFoundService;
-use futures::{executor, future::ready};
-use http_body::Body as HttpBody;
+use futures::{executor, StreamExt};
+use http_body_util::{BodyExt, BodyStream, Full};
 use hyper::{
-    body::Bytes,
-    header::HeaderValue,
-    service::{make_service_fn, service_fn, Service},
-    Body, Request as HyperRequest, Response as HyperResponse, Server,
+    body::{Bytes, Incoming},
+    header::{HeaderValue, CONTENT_TYPE},
+    server::conn::http1,
+    service::{service_fn, Service},
+    Request as HyperRequest, Response as HyperResponse,
 };
+use hyper_util::rt::TokioIo;
 use lazy_static::lazy_static;
+use multer::Multipart;
 use regex::Regex;
 use serde_json::Value;
-use socketioxide::{adapter::LocalAdapter, service::SocketIoService, Socket, SocketIo};
+use socketioxide::{
+    adapter::LocalAdapter,
+    extract::{Data, SocketRef},
+    service::SocketIoService,
+    socket::DisconnectReason,
+    SocketIo,
+};
 use std::{
     collections::HashMap,
     convert::Infallible,
     fmt::Display,
+    fs::{metadata, File},
+    io::Write,
     net::SocketAddr,
+    path::Path,
     str::FromStr,
-    sync::{Arc, Mutex},
+    sync::Mutex,
 };
+use tokio::net::TcpListener;
 
-type SocketIOService = SocketIoService<LocalAdapter, NotFoundService>;
+type SocketIOService = SocketIoService<NotFoundService, LocalAdapter>;
 
 lazy_static! {
     static ref SOCKET_SERVICE: (Mutex<SocketIOService>, SocketIo) = {
-        let (service, io) = SocketIo::builder().build_svc();
+        let (service, io) = SocketIo::new_svc();
         (Mutex::new(service), io)
     };
-    static ref SOCKETS: Mutex<HashMap<String, Arc<Socket<LocalAdapter>>>> =
-        Mutex::new(HashMap::new());
+    static ref SOCKETS: Mutex<HashMap<String, SocketRef>> = Mutex::new(HashMap::new());
     static ref DYN_FIELDS_REGEX: Regex = Regex::new(r"__(?P<field>\w+)").unwrap();
 }
 
@@ -88,10 +100,11 @@ impl Display for ReqMethod {
 
 /// An HTTP Request
 #[derive(Debug)]
-pub struct Request {
+pub struct Request<'a> {
     pub method: ReqMethod,
     pub path: String,
     pub body: Option<String>,
+    pub multipart_body: Option<Multipart<'a>>,
     pub headers: Vec<String>,
 
     /// If the path is matched against a dynamic route, the
@@ -105,7 +118,7 @@ pub struct Request {
     pub dyn_fields: Option<HashMap<String, String>>,
 }
 
-impl Request {
+impl<'a> Request<'_> {
     /// Get the request 'query parameters'
     pub fn query_params(&self) -> Option<HashMap<String, String>> {
         if !self.path.contains("?") {
@@ -152,6 +165,48 @@ impl Request {
         }
 
         Err(json_response!(400, {"message": "Method not allowed"}))
+    }
+
+    /// Processes the multipart body of the request,
+    /// uploading the files to the specified `dest`ination.
+    /// The resulting Map contains the fields values and the
+    /// path of the uploaded files.
+    pub async fn process_upload<P>(self, dest: P) -> Result<HashMap<String, String>, Response>
+    where
+        P: AsRef<Path>,
+    {
+        if self.multipart_body.is_none() {
+            return Err(json_response!(400, {"message": "Bad request"}));
+        }
+
+        if !metadata(dest.as_ref()).map_or(false, |m| m.is_dir()) {
+            panic!("Speicified destination is not a directory");
+        }
+
+        let mut fields = HashMap::<String, String>::new();
+        let mut multipart_body = self.multipart_body.unwrap();
+
+        while let Some(mut field) = multipart_body.next_field().await.unwrap() {
+            let name = field.name().map(|n| n.to_string());
+            let file_name = field.file_name();
+
+            let value = if let Some(fname) = file_name {
+                let path = dest.as_ref().join(fname);
+                let mut file = File::create(&path).unwrap();
+
+                while let Some(chunk) = field.chunk().await.unwrap() {
+                    file.write(&chunk).ok();
+                }
+
+                path.to_str().unwrap().to_string()
+            } else {
+                field.text().await.unwrap_or("".to_string())
+            };
+
+            fields.insert(name.unwrap(), value);
+        }
+
+        Ok(fields)
     }
 }
 
@@ -209,31 +264,34 @@ fn matches_dynamic_route(path: &str, dynamic_route: &str, req: &mut Request) -> 
 }
 
 fn get_sio_service() -> SocketIOService {
-    SOCKET_SERVICE.0.lock().unwrap().to_owned()
+    SOCKET_SERVICE.0.lock().unwrap().clone()
 }
 
-async fn handle_sio_request(req: HyperRequest<Body>) -> Result<HyperResponse<Body>, Infallible> {
-    get_sio_service().call(req).await.map(|mut res| {
+async fn handle_sio_request(
+    req: HyperRequest<Incoming>,
+) -> Result<HyperResponse<Full<Bytes>>, Infallible> {
+    get_sio_service().call(req).await.map(|res| {
         // Response mapping
-        let mut response = HyperResponse::builder();
-
-        response = response.status(res.status());
-        response = response.version(res.version());
+        let mut response = HyperResponse::builder()
+            .status(res.status())
+            .version(res.version());
 
         for header in res.headers() {
             response = response.header(header.0, header.1)
         }
 
-        let body = Body::from(
-            executor::block_on(res.data())
-                .unwrap_or(Ok(Bytes::default()))
-                .unwrap(),
-        );
+        let body = Full::new(executor::block_on(async move {
+            res.collect()
+                .await
+                .ok()
+                .map_or(Bytes::new(), |b| b.to_bytes())
+        }));
+
         response.body(body).unwrap()
     })
 }
 
-async fn handle(mut req: Request) -> Response {
+async fn handle(mut req: Request<'_>) -> Response {
     let req_path = req.path.clone();
     let clean_path = req_path.split("?").collect::<Vec<_>>()[0].trim_matches('/');
 
@@ -248,22 +306,45 @@ async fn handle(mut req: Request) -> Response {
     }
 }
 
-async fn handle_std_request(
-    mut req: HyperRequest<Body>,
-) -> Result<HyperResponse<Body>, Infallible> {
+async fn map_request<'a>(req: HyperRequest<Incoming>) -> Request<'a> {
     let mut request = Request {
         method: ReqMethod::from(&req.method().to_string()),
         path: req.uri().to_string(),
-        body: req.body_mut().data().await.map_or(None, |res| {
-            res.map_or(None, |body| String::from_utf8(body.to_vec()).ok())
-        }),
+        body: None,
         headers: req
             .headers()
             .iter()
             .map(|h| format!("{}: {}", h.0, h.1.to_str().unwrap_or("")))
             .collect(),
         dyn_fields: None,
+        multipart_body: None,
     };
+
+    let multipart_boundary = req
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|ct| ct.to_str().ok())
+        .and_then(|ct| multer::parse_boundary(ct).ok());
+
+    if let Some(boundary) = multipart_boundary {
+        let body_stream = BodyStream::new(req.into_body()).filter_map(|result| async move {
+            result.map(|frame| frame.into_data().ok()).transpose()
+        });
+
+        request.multipart_body = Some(Multipart::new(body_stream, boundary));
+    } else {
+        request.body = req.collect().await.ok().map_or(None, |b| {
+            String::from_utf8(b.to_bytes().iter().cloned().collect()).ok()
+        });
+    }
+
+    request
+}
+
+async fn handle_std_request(
+    req: HyperRequest<Incoming>,
+) -> Result<HyperResponse<Full<Bytes>>, Infallible> {
+    let request = map_request(req).await;
 
     #[cfg(debug_assertions)]
     let method = request.method.clone();
@@ -286,17 +367,18 @@ async fn handle_std_request(
         }
     }
 
-    let mut res_body = Body::empty();
-    if let Some(b) = response.body {
-        if let Some(body) = String::from_utf8(b).ok() {
-            res_body = Body::from(body);
-        }
-    }
+    let res_body = if let Some(body) = response.body {
+        Full::new(Bytes::from(body))
+    } else {
+        Full::new(Bytes::default())
+    };
 
     Ok(res.body(res_body).unwrap())
 }
 
-async fn handle_request(req: HyperRequest<Body>) -> Result<HyperResponse<Body>, Infallible> {
+async fn handle_request(
+    req: HyperRequest<Incoming>,
+) -> Result<HyperResponse<Full<Bytes>>, Infallible> {
     let result = match (req.uri().path(), req.headers().contains_key("Upgrade")) {
         (path, header) if header || ["/socket.io", "/ws"].iter().any(|p| path.starts_with(p)) => {
             handle_sio_request(req).await
@@ -341,16 +423,25 @@ impl WebServer {
 
     /// Start the server.
     pub async fn start(&self) {
-        let make_svc =
-            make_service_fn(move |_| ready(Ok::<_, Infallible>(service_fn(handle_request))));
-        let server = Server::bind(&self.address).serve(make_svc);
+        let listener = TcpListener::bind(self.address).await.unwrap();
+        let service = service_fn(handle_request);
 
         #[cfg(debug_assertions)]
         println!("> Server running at http://{}", self.address);
 
-        if let Err(e) = server.await {
-            #[cfg(debug_assertions)]
-            eprintln!("Server error: {e}")
+        loop {
+            let (stream, _) = listener.accept().await.unwrap();
+            let io = TokioIo::new(stream);
+
+            tokio::task::spawn(async move {
+                if let Err(e) = http1::Builder::new()
+                    .serve_connection(io, service.clone())
+                    .await
+                {
+                    #[cfg(debug_assertions)]
+                    eprintln!("Server error: {e}")
+                }
+            });
         }
     }
 }
@@ -368,14 +459,15 @@ impl SocketIO {
     /// Create a given `namespace`, providing
     /// default auth and disconnection handling
     pub fn add_ns(namespace: &str) {
-        SOCKET_SERVICE
-            .1
-            .ns(namespace, |socket, auth: Value| async move {
+        let namespace = namespace.to_string();
+        SOCKET_SERVICE.1.ns(
+            namespace,
+            |socket: SocketRef, Data(data): Data<Value>| async move {
                 #[cfg(debug_assertions)]
                 println!("`Socket.IO` connected: {:?} {:?}", socket.ns(), socket.id);
-                socket.emit("auth", auth).ok();
+                socket.emit("auth", data).ok();
 
-                socket.on_disconnect(|socket, reason| async move {
+                socket.on_disconnect(|socket: SocketRef, reason: DisconnectReason| async move {
                     SOCKETS.lock().unwrap().remove(&socket.id.to_string());
                     #[cfg(debug_assertions)]
                     println!("Socket.IO disconnected: {} {}", socket.id, reason);
@@ -385,7 +477,8 @@ impl SocketIO {
                     .lock()
                     .unwrap()
                     .insert(socket.id.to_string(), socket);
-            });
+            },
+        );
     }
 
     /// Emit the given `data` on the specified `namespace` `topic`
@@ -393,9 +486,10 @@ impl SocketIO {
         #[cfg(debug_assertions)]
         println!("Emitting on namespace {namespace} topic {topic} → {data}");
 
+        let topic = topic.to_string();
         for socket in SOCKETS.lock().unwrap().values() {
             if socket.ns() == namespace {
-                socket.emit(topic, data.clone()).ok();
+                socket.emit(topic.clone(), data.clone()).ok();
             }
         }
     }
