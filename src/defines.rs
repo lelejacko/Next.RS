@@ -349,6 +349,7 @@ impl WebServer {
         println!("> Server running at http://{}", self.address);
 
         if let Err(e) = server.await {
+            #[cfg(debug_assertions)]
             eprintln!("Server error: {e}")
         }
     }
@@ -359,6 +360,10 @@ pub struct SocketIO;
 
 impl SocketIO {
     // TODO: add namespace handling
+
+    pub fn has_connections() -> bool {
+        !SOCKETS.lock().unwrap().is_empty()
+    }
 
     /// Create a given `namespace`, providing
     /// default auth and disconnection handling
