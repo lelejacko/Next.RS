@@ -11,7 +11,7 @@ static ROUTES_DIR: &str = "routes";
 lazy_static! {
     static ref ACTUAL_ROUTES_PATH: String = String::from_utf8(
         Command::new("sh")
-            .args(["-c", &format!("find . | grep -oP \".*routes$\"")])
+            .args(["-c", &format!("find . | grep \".*routes$\"")])
             .output()
             .unwrap()
             .stdout,
@@ -21,16 +21,13 @@ lazy_static! {
     .to_string();
     static ref CALL_SITE_PATH: String = String::from_utf8(
         Command::new("sh")
-            .args([
-                "-c",
-                "grep -Rw . -e \"make_server\\!\" | grep -oP \".*(?<=.rs)\" | grep -v target"
-            ])
+            .args(["-c", "grep -Rw . -e \"make_server\\!\" | grep -v target"])
             .output()
             .unwrap()
             .stdout,
     )
     .unwrap()
-    .split_once('\n')
+    .split_once(".rs")
     .unwrap()
     .0
     .rsplit_once('/')
@@ -185,8 +182,8 @@ impl Route {
         } else if self.is_static() {
             handler += &format!(
                 "Ok(Response {{
-                    code: 200, 
-                    headers: Some({mod_path}HEADERS.to_vec()), 
+                    code: 200,
+                    headers: Some({mod_path}HEADERS.to_vec()),
                     body: Some({mod_path}BODY.to_vec())
                 }})"
             );
