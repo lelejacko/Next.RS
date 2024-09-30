@@ -51,7 +51,7 @@ impl Route {
         let mut static_body: Option<String> = None;
         let mut mime_type: Option<MimeType> = None;
 
-        if metadata(&path).unwrap().is_dir() {
+        if !path.is_empty() && metadata(&path).unwrap().is_dir() {
             children = Some(Self::get_children(&path));
         } else if !path.ends_with(".rs") {
             let relative_path = if path.contains(&*CALL_SITE_PATH) {
