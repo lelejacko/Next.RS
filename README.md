@@ -1,5 +1,6 @@
 # NextRS
-NextRS is a web backend framework.
+NextRS provides a **macro** to create a HTTP and Socket.IO server.
+Both HTTP and Socket.IO services share the same port.
 
 ### Features:
 - **Filesystem based routes**. All files under `src/**/routes` folder are exposed:
@@ -9,9 +10,11 @@ NextRS is a web backend framework.
 - **Query params parsing**. Query parameters can be accessed as an `HashMap` object with through the `Request.query_params()` method
 - `socket.io` handling on the same `HTTP` port.
 
-### To install:
-Add the following dependencies to your `Cargo.toml`:
+### Dependencies:
+NextRS depends on the following crates:
 ```toml
+# Cargo.toml
+
 next_rs = { git = "https://github.com/lelejacko/Next.RS.git" }
 bytes = "1.5.0"
 engineioxide = "0.10.2"
