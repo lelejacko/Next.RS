@@ -386,6 +386,7 @@ async fn handle_request(
         _ => handle_std_request(req).await,
     };
 
+    // TODO: let set custom headers
     result.map(|mut res| {
         let headers = res.headers_mut();
         headers.insert("Access-Control-Allow-Origin", HeaderValue::from_static("*"));
