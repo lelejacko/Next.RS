@@ -256,12 +256,12 @@ impl Route {
         }
 
         handlers.sort_by(|h1, h2| {
-            let h1_dyn = h1.contains("matches_dynamic_route");
-            let h2_dyn = h2.contains("matches_dynamic_route");
+            let h1_dyn = h1.match_indices("__").count();
+            let h2_dyn = h2.match_indices("__").count();
 
             if h1_dyn == h2_dyn {
                 Ordering::Equal
-            } else if h1_dyn && !h2_dyn {
+            } else if h1_dyn > h2_dyn {
                 Ordering::Greater
             } else {
                 Ordering::Less
