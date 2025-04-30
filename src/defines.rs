@@ -437,6 +437,7 @@ impl WebServer {
             tokio::task::spawn(async move {
                 if let Err(e) = http1::Builder::new()
                     .serve_connection(io, service.clone())
+                    .with_upgrades()
                     .await
                 {
                     #[cfg(debug_assertions)]
@@ -466,7 +467,7 @@ impl SocketIO {
             |socket: SocketRef, Data(data): Data<Value>| async move {
                 #[cfg(debug_assertions)]
                 println!("`Socket.IO` connected: {:?} {:?}", socket.ns(), socket.id);
-                socket.emit("auth", data).ok();
+                socket.emit("auth", &data).ok();
 
                 socket.on_disconnect(|socket: SocketRef, reason: DisconnectReason| async move {
                     SOCKETS.lock().unwrap().remove(&socket.id.to_string());
@@ -490,7 +491,7 @@ impl SocketIO {
         let topic = topic.to_string();
         for socket in SOCKETS.lock().unwrap().values() {
             if socket.ns() == namespace {
-                socket.emit(topic.clone(), data.clone()).ok();
+                socket.emit(topic.clone(), &data).ok();
             }
         }
     }

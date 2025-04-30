@@ -15,10 +15,10 @@
             document.querySelector("h1").textContent = msg;
         }
 
-        const socket = io("http://127.0.0.1:8080");
+        const socket = io("http://127.0.0.1:8080", { transports: ["websocket"] });
 
         socket.on("connect", () => console.log("Socket.io connected!"));
-        socket.on("error", (e) =>  console.log(`Error: ${e.code} => ${e.message} - ${e.toString()}`));
+        socket.on("error", (e) => console.log(`Error: ${e.code} => ${e.message} - ${e.toString()}`));
         socket.on("message", setMessage);
     </script>
 </body>

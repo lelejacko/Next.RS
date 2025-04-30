@@ -16,17 +16,17 @@ NextRS depends on the following crates:
 # Cargo.toml
 
 next_rs = { git = "https://github.com/lelejacko/Next.RS.git" }
-bytes = "1.5.0"
-engineioxide = "0.10.2"
+bytes = "1.10.1"
+engineioxide = "0.16.2"
 futures = "0.3.29"
 http-body-util = "0.1.0"
-hyper = { version = "1.2.0", features = ["full"] }
+hyper = { version = "1.6.0", features = ["full"] }
 hyper-util = { version = "0.1.3", features = ["tokio"] }
 lazy_static = "1.4.0"
 multer = "3.0.0"
 regex = "1.10.3"
 serde_json = "^1.0.107"
-socketioxide = "0.10.2"
+socketioxide = "0.16.2"
 tokio = { version = "^1.33.0", features = ["macros", "rt-multi-thread"] }
 ```
 
