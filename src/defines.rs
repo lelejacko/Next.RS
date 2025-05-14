@@ -44,7 +44,7 @@ lazy_static! {
         (Mutex::new(service), io)
     };
     static ref SOCKETS: Mutex<HashMap<String, SocketRef>> = Mutex::new(HashMap::new());
-    static ref DYN_FIELDS_REGEX: Regex = Regex::new(r"__(?P<field>[\w-_]+)").unwrap();
+    static ref DYN_FIELDS_REGEX: Regex = Regex::new(r"__(?P<field>[\w\-_]+)").unwrap();
 }
 
 /// HTTP request method
@@ -231,7 +231,7 @@ impl Response {
 
 fn get_dynamic_fields(path: &str, dynamic_route: &str) -> Option<HashMap<String, String>> {
     let regex_src = DYN_FIELDS_REGEX
-        .replace_all(&("^".to_string() + dynamic_route + "$"), "(?P<$field>\\w+)")
+        .replace_all(&("^".to_string() + dynamic_route + "$"), "(?P<$field>[\\w\\-_}+)")
         .to_string();
 
     let regex = Regex::new(&regex_src).unwrap();
