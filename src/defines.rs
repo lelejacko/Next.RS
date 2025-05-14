@@ -231,7 +231,7 @@ impl Response {
 
 fn get_dynamic_fields(path: &str, dynamic_route: &str) -> Option<HashMap<String, String>> {
     let regex_src = DYN_FIELDS_REGEX
-        .replace_all(&("^".to_string() + dynamic_route + "$"), "(?P<$field>[\\w\\-_}+)")
+        .replace_all(&("^".to_string() + dynamic_route + "$"), "(?P<$field>[\\w\\-_]+)")
         .to_string();
 
     let regex = Regex::new(&regex_src).unwrap();
