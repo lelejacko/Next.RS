@@ -44,7 +44,7 @@ lazy_static! {
         (Mutex::new(service), io)
     };
     static ref SOCKETS: Mutex<HashMap<String, SocketRef>> = Mutex::new(HashMap::new());
-    static ref DYN_FIELDS_REGEX: Regex = Regex::new(r"__(?P<field>\w+)").unwrap();
+    static ref DYN_FIELDS_REGEX: Regex = Regex::new(r"__(?P<field>[\w-_]+)").unwrap();
 }
 
 /// HTTP request method
